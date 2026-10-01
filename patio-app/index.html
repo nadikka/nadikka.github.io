@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>El Patio de Maniobras</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+    <style>
+      /* ==========================================================
+         Consola del Patio — la UI DOM alrededor del canvas habla el
+         mismo idioma que el tablero CTC de adentro: tinta azul, mono
+         técnica (JetBrains Mono, cargada por main.ts vía @fontsource),
+         teclas de consola, acentos por tipo de nodo.
+         Tokens compartidos con render/paletaRed.ts — si se cambia uno
+         allá, cambiarlo acá.
+         ========================================================== */
+      :root {
+        --tinta: #0b0e16;
+        --panel: #10141f;
+        --panel-2: #171c2b;
+        --borde: #262c40;
+        --borde-suave: #1c2233;
+        --texto: #e8e6df;
+        --texto-apagado: #6a6d7a;
+        --disparador: #56b8ff;
+        --aguja: #ffc93c;
+        --compuesta: #d96ae8;
+        --servicio: #46d69c;
+        --acento: #ffeec9;
+        --alarma: #e74c3c;
+        --exito: #8fd694;
+        --error-suave: #e0a05a;
+        --fuente: "JetBrains Mono", "Courier New", monospace;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--tinta);
+        color: var(--texto);
+        font-family: var(--fuente);
+        height: 100%;
+      }
+      #app {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 18px 16px 24px;
+        min-height: 100%;
+        box-sizing: border-box;
+      }
+
+      /* --- cabecera: logotipo + línea de señal ------------------- */
+      #cabecera {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        user-select: none;
+      }
+      h1 {
+        font-family: var(--fuente);
+        font-weight: 700;
+        font-size: 18px;
+        letter-spacing: 0.32em;
+        text-transform: uppercase;
+        margin: 0;
+        text-indent: 0.32em; /* compensa el letter-spacing del último carácter */
+      }
+      /* línea de señal decorativa: vía + los 4 tipos de nodo del juego */
+      #linea-senal {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        font-size: 10px;
+        line-height: 1;
+        color: var(--borde);
+        letter-spacing: 0;
+      }
+      #linea-senal .tramo {
+        color: #3f4457;
+      }
+      #linea-senal .nodo-disparador { color: var(--disparador); }
+      #linea-senal .nodo-aguja { color: var(--aguja); }
+      #linea-senal .nodo-compuesta { color: var(--compuesta); }
+      #linea-senal .nodo-servicio { color: var(--servicio); }
+      #nivel-badge {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        color: var(--texto-apagado);
+        text-transform: uppercase;
+        border: 1px solid var(--borde-suave);
+        border-radius: 3px;
+        padding: 3px 10px;
+        background: var(--panel);
+      }
+      #nivel-badge:empty {
+        display: none;
+      }
+
+      /* --- insignia + subcabecera institucional --------------------- */
+      #insignia {
+        display: block;
+        width: 48px;
+        height: 48px;
+        opacity: 0.85;
+        filter: drop-shadow(0 0 6px rgba(255, 201, 60, 0.3));
+        user-select: none;
+        pointer-events: none;
+      }
+      #subcabecera {
+        font-family: 'Archivo Narrow', 'Arial Narrow', sans-serif;
+        font-weight: 400;
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--texto-apagado);
+        border-bottom: 1px solid var(--borde-suave);
+        padding-bottom: 8px;
+        margin-bottom: 2px;
+        user-select: none;
+      }
+
+      /* --- marco del canvas -------------------------------------- */
+      #patio-root {
+        position: relative;
+        border: 1px solid var(--borde);
+        border-radius: 4px;
+        line-height: 0;
+        /* viñeta sutil sobre el tablero — es luz de sala de control, no
+           decoración: oscurece apenas los bordes para hundir el canvas */
+        box-shadow:
+          inset 0 0 90px rgba(0, 0, 0, 0.5),
+          0 0 0 1px rgba(0, 0, 0, 0.6);
+      }
+      #patio-root canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: 3px;
+      }
+
+      /* --- popup de estación: ficha de despacho ------------------- */
+      #popup-estacion {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(5, 7, 12, 0.72);
+        z-index: 10;
+        box-sizing: border-box;
+      }
+      #popup-estacion.visible {
+        display: flex;
+      }
+      #popup-caja {
+        --popup-color: var(--disparador);
+        max-width: 420px;
+        width: 100%;
+        max-height: 100%;
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--popup-color);
+        border-radius: 4px;
+        padding: 0 16px 12px;
+        box-sizing: border-box;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      /* acento por tipo de nodo: el borde y el título de la ficha toman el
+         color del glifo que la abrió — la card ES de ese nodo */
+      #popup-caja[data-tipo='disparador'] { --popup-color: var(--disparador); }
+      #popup-caja[data-tipo='aguja'] { --popup-color: var(--aguja); }
+      #popup-caja[data-tipo='compuesta'] { --popup-color: var(--compuesta); }
+      #popup-caja[data-tipo='servicio'] { --popup-color: var(--servicio); }
+
+      /* contador "3 / 9" de la construcción guiada — turnos largos (Turno 4:
+         8 estaciones + auxiliares) se sentían interminables sin esto
+         (pedido explícito de Leo). Arriba del título, discreto. */
+      .popup-progreso {
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        color: var(--texto-apagado);
+        text-align: right;
+        margin: 10px -16px -2px;
+        padding: 0 16px;
+      }
+
+      .popup-titulo {
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--popup-color);
+        border-bottom: 1px solid var(--borde-suave);
+        margin: 0 -16px 8px;
+        padding: 10px 16px 8px;
+        background: var(--panel-2);
+      }
+      .popup-fila {
+        margin-top: 6px;
+      }
+      .popup-fila strong {
+        display: block;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--texto-apagado);
+        margin-bottom: 1px;
+      }
+      .popup-auxiliares-titulo {
+        margin-top: 10px;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--texto-apagado);
+      }
+      .popup-auxiliares {
+        margin: 4px 0 0 0;
+        padding-left: 18px;
+      }
+      .popup-nota {
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid var(--borde-suave);
+      }
+      .popup-nota .nota-ruteo {
+        color: #7ab8e8;
+      }
+      .popup-datos {
+        margin: 6px 0 10px;
+        color: var(--texto-apagado);
+        background: var(--tinta);
+        border: 1px solid var(--borde-suave);
+        border-radius: 3px;
+        padding: 6px 8px;
+        font-size: 12px;
+        word-break: break-word;
+      }
+      /* Variante manila: datos del tren como guía de carga colgante */
+      #popup-caja.modo-manila {
+        background: #f4e4c1;
+        color: #2e2518;
+        border-color: #c4a96a;
+        border-radius: 2px 2px 4px 4px;
+        padding-top: 18px;
+        /* agujero de etiqueta colgante */
+        position: relative;
+      }
+      #popup-caja.modo-manila::before {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 10px;
+        height: 10px;
+        background: var(--tinta);
+        border-radius: 50%;
+        z-index: 2;
+      }
+      #popup-caja.modo-manila .popup-titulo {
+        background: transparent;
+        color: #3a2e1a;
+        border-bottom: 1px solid #c4a96a;
+        font-family: 'Archivo Narrow', 'Arial Narrow', sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+      }
+      #popup-caja.modo-manila .popup-datos {
+        background: rgba(139, 119, 80, 0.08);
+        border: 1px solid #d4c4a0;
+        color: #2e2518;
+        font-family: var(--fuente);
+      }
+      #popup-caja.modo-manila .boton-popup.avanzar {
+        background: var(--tinta);
+        color: var(--disparador);
+        border-color: var(--disparador);
+      }
+      #popup-caja.modo-manila .boton-popup.opcion-prediccion {
+        background: #f4e4c1;
+        color: #3a2e1a;
+        border-color: #c4a96a;
+      }
+      #popup-caja.modo-manila .boton-popup.opcion-prediccion::before {
+        content: '⟂ ';
+        color: #8b7750;
+      }
+      #popup-caja.modo-manila .boton-popup.opcion-prediccion:hover {
+        background: #e8d5a8;
+        border-color: #8b7750;
+      }
+
+      /* globo diegético anclado a la estación (cola vía --cola-x en JS) */
+      #popup-caja.diegetico {
+        position: absolute;
+        width: max-content;
+        max-width: min(320px, calc(100% - 24px));
+      }
+      #popup-caja.diegetico::before,
+      #popup-caja.diegetico::after {
+        content: '';
+        position: absolute;
+        left: var(--cola-x, 50%);
+        transform: translateX(-50%);
+        width: 0;
+        height: 0;
+        border-left: 9px solid transparent;
+        border-right: 9px solid transparent;
+      }
+      #popup-caja.diegetico.cola-abajo::before {
+        top: 100%;
+        border-top: 9px solid var(--popup-color);
+      }
+      #popup-caja.diegetico.cola-abajo::after {
+        top: 100%;
+        margin-top: -1.5px;
+        border-left-width: 8px;
+        border-right-width: 8px;
+        border-top: 8px solid var(--panel);
+      }
+      #popup-caja.diegetico.cola-arriba::before {
+        bottom: 100%;
+        border-bottom: 9px solid var(--popup-color);
+      }
+      #popup-caja.diegetico.cola-arriba::after {
+        bottom: 100%;
+        margin-bottom: -1.5px;
+        border-left-width: 8px;
+        border-right-width: 8px;
+        border-bottom: 8px solid var(--panel-2);
+      }
+
+      /* --- teclas de consola (base común de todos los botones) ---- */
+      #boton-pausa,
+      #boton-reiniciar,
+      #boton-volver-niveles,
+      .boton-tren,
+      .boton-nivel,
+      .boton-popup {
+        font-family: var(--fuente);
+        background: var(--panel);
+        color: var(--texto);
+        border: 1px solid var(--borde);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease, transform 0.05s ease;
+      }
+      #boton-pausa:active,
+      #boton-reiniciar:active,
+      .boton-tren:active:not(:disabled),
+      .boton-nivel:active,
+      .boton-popup:active {
+        transform: translateY(1px);
+      }
+
+      #controles-superiores {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        max-width: 960px;
+      }
+      #boton-pausa,
+      #boton-reiniciar,
+      #boton-volver-niveles {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 7px 14px;
+      }
+      #boton-pausa:hover,
+      #boton-reiniciar:hover {
+        border-color: var(--disparador);
+      }
+      #boton-pausa.pausado {
+        border-color: var(--aguja);
+        color: var(--aguja);
+      }
+      #boton-volver-niveles {
+        color: var(--texto-apagado);
+        background: transparent;
+        border-color: var(--borde-suave);
+      }
+      #boton-volver-niveles:hover {
+        color: var(--texto);
+        border-color: var(--texto-apagado);
+      }
+
+      /* --- andén de trenes: los mensajes reales a despachar -------- */
+      #selector-trenes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        width: 100%;
+        max-width: 960px;
+        justify-content: center;
+      }
+      #selector-trenes:not(:empty)::before {
+        content: 'Andén — SELECCIONE MENSAJE:';
+        flex-basis: 100%;
+        text-align: center;
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--texto-apagado);
+        margin-bottom: 2px;
+      }
+      #selector-trenes:has(.progreso-mensajes)::before { display:none; }
+      .progreso-mensajes { flex-basis:100%; text-align:center; font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:#a4c4d8; }
+      .boton-tren {
+        font-size: 13px;
+        padding: 9px 14px;
+      }
+      .boton-tren::before {
+        content: '▸ ';
+        color: var(--disparador);
+      }
+      .boton-tren:hover:not(:disabled) {
+        border-color: var(--disparador);
+        background: var(--panel-2);
+      }
+      .boton-tren.visto { border-color:#648d76; color:#d6efdf; }
+      .boton-tren.visto::before { content:''; }
+      .boton-tren:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      /* --- registro de despacho (panel de estado) ------------------ */
+      #panel-dialogo {
+        width: 100%;
+        max-width: 960px;
+        min-height: 64px;
+        max-height: 260px;
+        overflow-y: auto;
+        background: #f4e4c1;
+        color: #2e2518;
+        border: 1px solid #c4a96a;
+        border-radius: 2px;
+        padding: 12px 16px;
+        box-sizing: border-box;
+        font-size: 13px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        box-shadow: inset 0 0 0 1px rgba(139,119,80,0.15);
+        /* renglones de libro */
+        background-image:
+          repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 23px,
+            rgba(139, 119, 80, 0.15) 23px,
+            rgba(139, 119, 80, 0.15) 24px
+          );
+        background-position: 0 8px;
+      }
+      #panel-dialogo::before {
+        content: 'LIBRO DE TURNO';
+        display: block;
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        color: var(--texto-apagado);
+        margin-bottom: 6px;
+      }
+      #panel-dialogo.vacio {
+        color: #8b7750;
+      }
+      #panel-dialogo .exito {
+        color: #2d6a2e;
+      }
+      #panel-dialogo .error {
+        color: #8b6914;
+      }
+      #panel-dialogo a.descarga {
+        color: #7ab8e8;
+      }
+
+      /* --- botón grande de Comenzar: palanca maestra ---------------- */
+      #boton-comenzar-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 5;
+      }
+      @keyframes pulso-comenzar {
+        0%, 100% { box-shadow: 0 0 18px rgba(86, 184, 255, 0.18); }
+        50% { box-shadow: 0 0 34px rgba(86, 184, 255, 0.42); }
+      }
+      .boton-comenzar-grande {
+        pointer-events: auto;
+        font-family: var(--fuente);
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        text-indent: 0.22em;
+        padding: 18px 42px;
+        background: var(--tinta);
+        color: var(--disparador);
+        border: 2px solid var(--disparador);
+        border-radius: 6px;
+        cursor: pointer;
+        animation: pulso-comenzar 2.2s ease-in-out infinite;
+      }
+      .boton-comenzar-grande:hover {
+        background: var(--disparador);
+        color: var(--tinta);
+      }
+      /* Variante "abajo" del overlay: los botones de avance (Siguiente/Atrás)
+         durante la lección van al centro-ABAJO del canvas, no al medio — al
+         medio tapaban justo el nodo que la ficha está explicando (reportado
+         por Leo). Comenzar sigue usando el modo centrado por defecto. */
+      #boton-comenzar-overlay.abajo {
+        align-items: flex-end;
+        padding-bottom: 14px;
+        box-sizing: border-box;
+      }
+      .fila-avance {
+        display: flex;
+        gap: 10px;
+        pointer-events: auto;
+      }
+      .boton-avance {
+        pointer-events: auto;
+        font-family: var(--fuente);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        text-indent: 0.14em;
+        padding: 11px 26px;
+        background: var(--tinta);
+        color: var(--disparador);
+        border: 2px solid var(--disparador);
+        border-radius: 6px;
+        cursor: pointer;
+        animation: pulso-comenzar 2.2s ease-in-out infinite;
+      }
+      .boton-avance:hover {
+        background: var(--disparador);
+        color: var(--tinta);
+      }
+      /* Atrás: secundario — sin pulso, gris, no compite con Siguiente */
+      .boton-avance.atras {
+        animation: none;
+        color: var(--texto-apagado);
+        border-color: var(--borde);
+      }
+      .boton-avance.atras:hover {
+        background: var(--panel-2);
+        color: var(--texto);
+        border-color: var(--texto-apagado);
+      }
+
+      /* --- botones dentro del popup --------------------------------- */
+      .boton-popup {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 13px;
+        text-align: left;
+        padding: 8px 12px;
+        margin-top: 8px;
+        background: var(--tinta);
+      }
+      .boton-popup:hover {
+        border-color: var(--texto-apagado);
+      }
+      /* Avanzar (Siguiente →/Cerrar/Despachar otro): una sola acción posible,
+         toma el color de la ficha — "esto continúa la historia". */
+      .boton-popup.avanzar {
+        text-align: center;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-size: 11px;
+        padding: 9px 12px;
+        border-color: var(--popup-color, var(--disparador));
+        color: var(--popup-color, var(--disparador));
+      }
+      .boton-popup.avanzar:hover {
+        background: var(--popup-color, var(--disparador));
+        color: var(--tinta);
+      }
+      /* Opción de predicción: ámbar aguja — "esto es una apuesta". */
+      .boton-popup.opcion-prediccion {
+        border-color: #4a3f1a;
+        color: var(--aguja);
+      }
+      .boton-popup.opcion-prediccion::before {
+        content: '⟂ ';
+        color: var(--texto-apagado);
+      }
+      .boton-popup.opcion-prediccion:hover {
+        background: #2a2410;
+        border-color: var(--aguja);
+      }
+      .veredicto-acierto {
+        color: var(--exito);
+      }
+      .veredicto-error {
+        color: var(--error-suave);
+      }
+
+      /* --- selector de nivel: tablero de andenes --------------------- */
+      #selector-niveles {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        max-width: 960px;
+      }
+      #selector-niveles.visible {
+        display: flex;
+      }
+      #selector-niveles.visible::before {
+        content: 'SELECCIONE PLIEGO:';
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--texto-apagado);
+      }
+      .boton-nivel {
+        font-size: 14px;
+        padding: 12px 18px;
+        width: 100%;
+        max-width: 460px;
+        text-align: left;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+      .boton-nivel:hover {
+        border-color: var(--disparador);
+        background: var(--panel-2);
+      }
+      .boton-nivel .nivel-marca {
+        font-size: 11px;
+        color: var(--texto-apagado);
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+      }
+      .boton-nivel .nivel-marca.completado {
+        color: var(--exito);
+      }
+
+      /* --- Orden de Servicio (papel manila, overlay de apertura) ----- */
+      #orden-servicio-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 7, 12, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 20;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+      #orden-servicio-overlay.oculto {
+        display: none;
+      }
+      #orden-servicio-caja {
+        max-width: 520px;
+        width: 100%;
+        background: #f4e4c1;
+        color: #1a1a1a;
+        border-radius: 2px;
+        padding: 28px 24px 20px;
+        box-sizing: border-box;
+        font-family: var(--fuente);
+        font-size: 13px;
+        line-height: 1.65;
+        box-shadow:
+          0 4px 24px rgba(0,0,0,0.5),
+          inset 0 0 0 1px rgba(0,0,0,0.08);
+        /* textura sutil de papel */
+        background-image:
+          repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(139, 119, 80, 0.04) 2px,
+            rgba(139, 119, 80, 0.04) 4px
+          );
+      }
+      .orden-membrete {
+        font-family: 'Archivo Narrow', 'Arial Narrow', sans-serif;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #5c4a2e;
+        border-bottom: 1px solid #c4a96a;
+        padding-bottom: 6px;
+        margin-bottom: 10px;
+      }
+      .orden-titulo {
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #3a2e1a;
+        margin-bottom: 16px;
+      }
+      .orden-cuerpo {
+        color: #2e2518;
+      }
+      .orden-cuerpo p {
+        margin: 0 0 10px;
+      }
+      .orden-cuerpo .orden-tesis {
+        font-style: italic;
+        color: #5c4a2e;
+        border-left: 2px solid #c4a96a;
+        padding-left: 12px;
+        margin-top: 14px;
+      }
+      .orden-firma {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-top: 18px;
+        padding-top: 12px;
+        border-top: 1px solid #c4a96a;
+        font-family: 'Archivo Narrow', 'Arial Narrow', sans-serif;
+        font-style: italic;
+        font-size: 13px;
+        color: #3a2e1a;
+      }
+      .orden-sello {
+        display: inline-block;
+        color: #6b3fa0;
+        border: 2px solid #6b3fa0;
+        border-radius: 4px;
+        padding: 4px 10px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        transform: rotate(-6deg);
+        opacity: 0.7;
+        font-style: normal;
+      }
+      #boton-tomar-turno {
+        display: block;
+        width: 100%;
+        margin-top: 18px;
+        padding: 12px;
+        font-family: var(--fuente);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        text-indent: 0.16em;
+        background: var(--tinta);
+        color: var(--disparador);
+        border: 2px solid var(--disparador);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      #boton-tomar-turno:hover {
+        background: var(--disparador);
+        color: var(--tinta);
+      }
+
+      /* Presentación editorial; la escena y sus reglas conservan su funcionamiento. */
+      .patio-retorno { color: #c0c7d6; font-size: 11px; text-decoration: none; align-self: flex-start; }
+      .patio-contexto { color: #aeb9cc; font-size: 12px; line-height: 1.6; max-width: 66ch; margin: 10px auto; }
+      #selector-niveles.visible { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+      #selector-niveles.visible::before { grid-column: 1/-1; }
+      .boton-nivel { max-width: none; min-height: 66px; font-size: 11px; padding: 10px 12px; flex-wrap: wrap; }
+      .boton-nivel .nivel-marca { white-space: normal; font-size: 9px; }
+      .patio-error { padding: 30px; color: #f0e8d3; background: #161c2b; }
+      .patio-error a { display: block; margin-top: 18px; color: inherit; }
+      @media(max-width:640px) { #selector-niveles.visible { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+
+      /* Revisión del tablero: jerarquía visible, luz acotada y turno completo
+         dentro del viewport de escritorio. Los nodos conservan su código de color. */
+      body { background: radial-gradient(circle at 50% -25%, #202b42 0, #0b101b 52%, #080c14 100%); }
+      #app { height: 100dvh; min-height: 0; padding: 8px 14px; gap: 5px; justify-content: center; overflow: hidden; }
+      #cabecera { gap: 2px; }
+      #insignia { max-height: 28px; width: auto; }
+      #subcabecera { font-size: 9px; padding-bottom: 2px; }
+      #cabecera h1 { font-size: 15px; letter-spacing: .22em; }
+      #linea-senal { opacity: .7; }
+      .patio-contexto { font-size: 10px; margin: 1px auto; max-width: 80ch; text-align: center; }
+      #nivel-badge { padding: 2px 9px; border: 1px solid #43516a; border-radius: 99px; background: #182335; }
+      #patio-root { border-radius: 10px; border-color: #45536a; background:#0d1320; box-shadow: 0 12px 38px #0008, inset 0 0 0 1px #b5c9e214; overflow: hidden; }
+      #patio-root canvas { border-radius: 9px; }
+      #controles-superiores { gap: 6px; }
+      #controles-superiores button,.boton-tren { background:#192335; border:1px solid #45536a; color:#f3f1e9; border-radius:6px; }
+      #selector-trenes { margin: 0; }
+      .boton-tren { font-size: 11px; padding: 6px 10px; }
+      #panel-dialogo { min-height: 72px; max-height: 118px; padding: 8px 12px; border-radius: 6px; font-size: 11px; line-height:1.4; }
+      #panel-dialogo::before { margin-bottom: 2px; }
+      #panel-dialogo.exito { display:flex; align-items:center; justify-content:space-between; gap:12px; max-height:none; overflow:visible; }
+      #panel-dialogo.exito::before { display:none; }
+      #panel-dialogo.exito > div:first-child { flex: 1; min-width:0; }
+      .acta-cuerpo { display:grid; grid-template-columns:max-content minmax(0,1fr); gap:2px 12px; align-items:center; padding:2px 0; }
+      .acta-titulo { font-weight:800; font-size:13px; letter-spacing:.1em; text-transform:uppercase; }
+      #panel-dialogo.exito .acta-resultado { grid-column:2; grid-row:1 / 3; font-size:12px; line-height:1.35; white-space:normal; }
+      .acta-sello { grid-column:1; grid-row:2; color:#6b3fa0; border:1px solid #6b3fa0; border-radius:3px; padding:2px 5px; font-size:8px; font-weight:700; letter-spacing:.08em; transform:rotate(-3deg); text-align:center; }
+      .acta-firma { grid-column:1 / -1; font-family:"Archivo Narrow","Arial Narrow",sans-serif; font-style:italic; font-size:10px; color:#5b4932; }
+      #panel-dialogo.exito .acta-avance { color:#5d441f; font-size:10px; max-width:120px; }
+      #panel-dialogo.exito .boton-popup { width:auto; min-width:150px; margin:0!important; text-align:center; }
+      #selector-niveles.visible { width:min(960px,100%); }
+      .boton-nivel { flex-direction:column; align-items:start; justify-content:start; background:linear-gradient(160deg,#1a2639,#111927); border-color:#465774; border-radius:8px; line-height:1.3; }
+      .boton-nivel > span:first-child { color:#f6f1df; font-weight:700; }
+      .boton-nivel .nivel-contexto { display:block; color:#aab9ce; font-size:10px; line-height:1.45; font-weight:400; }
+      .boton-nivel:hover:not(:disabled) { border-color:#77bce7; background:#22324a; transform:translateY(-2px); }
+      #popup-caja { box-shadow:0 18px 44px #000b; border-radius:8px; }
+      .popup-rastro { display:grid; gap:7px; padding:10px; background:#0d1725; border:1px solid #405273; border-radius:5px; white-space:normal; }
+      .popup-rastro > div { display:grid; grid-template-columns:80px 1fr; gap:10px; font-size:12px; line-height:1.45; }
+      .popup-rastro strong { color:var(--popup-color,var(--disparador)); font-size:10px; letter-spacing:.09em; }
+      .popup-rastro span { color:#eff2f4; overflow-wrap:anywhere; }
+      .popup-rastro small { color:#9aaabf; line-height:1.4; }
+      @media(max-height:680px) and (min-width:700px) { #app { justify-content:flex-start; overflow:auto; } #panel-dialogo { max-height:96px; } }
+      @media(max-width:700px) {
+        #app { height:auto; min-height:100dvh; overflow:visible; padding:12px 10px; }
+        .patio-contexto { font-size:11px; }
+        #selector-niveles.visible { grid-template-columns:1fr; }
+        #panel-dialogo.exito { flex-wrap:wrap; }
+        #popup-estacion { position:fixed; inset:0; z-index:1000; padding:18px; }
+        #popup-caja, #popup-caja.diegetico { position:relative; left:auto!important; top:auto!important; max-height:min(78dvh,680px); width:min(100%,480px); margin:auto; }
+        #popup-caja.diegetico::before, #popup-caja.diegetico::after { display:none; }
+      }
+
+</style>
+    <script type="module" crossorigin src="/patio-app/assets/index-6Fd51bf1.js"></script>
+    <link rel="stylesheet" crossorigin href="/patio-app/assets/index-CU9taAz-.css">
+  </head>
+  <body>
+    <div id="app">
+      <a class="patio-retorno" href="/bitacora/">← BITÁCORA · M1 / LEER LA MÁQUINA</a>
+      <!-- Overlay de apertura: Orden de Servicio -->
+      <div id="orden-servicio-overlay">
+        <div id="orden-servicio-caja">
+          <div class="orden-membrete">F.C. GENERAL DE MENSAJERÍA — DIVISIÓN SEÑALES</div>
+          <div class="orden-titulo">ORDEN DE SERVICIO — TURNO Nº <span id="orden-turno-num">1</span></div>
+          <div class="orden-cuerpo">
+            <p>Todo mensaje que le mandás a un sistema automático pasa por un patio como este. Nadie lo ve. Es de noche, siempre.</p>
+            <p>Esta vez lo ves vos — y te toca el turno de señales.</p>
+            <p class="orden-tesis">Las agujas de este patio no leen mensajes. Leen etiquetas. El que quiera predecir un desvío, que aprenda a leer como lee la máquina.</p>
+          </div>
+          <div class="orden-firma">
+            <div class="orden-sello">RECIBIDO</div>
+            <div>El Jefe de Patio</div>
+          </div>
+          <button id="boton-tomar-turno" type="button">TOMAR EL TURNO</button>
+        </div>
+      </div>
+      <div id="cabecera">
+        <img id="insignia" src="/patio-app/insignia.svg" alt="" />
+        <div id="subcabecera">F.C. GENERAL DE MENSAJERÍA — DIVISIÓN SEÑALES · TURNO NOCHE</div>
+        <h1>El Patio de Maniobras</h1>
+        <div id="linea-senal" aria-hidden="true"><span class="tramo">━━━━</span><span class="nodo-disparador">●</span><span class="tramo">━━━━</span><span class="nodo-aguja">◆</span><span class="tramo">━━━━</span><span class="nodo-compuesta">▣</span><span class="tramo">━━━━</span><span class="nodo-servicio">●</span><span class="tramo">━━▶</span></div>
+        <p class="patio-contexto">Un juego para aprender a leer workflows de n8n: disparadores, filtros, rutas y agentes se vuelven estaciones. Seguí un mensaje y reconocé qué regla decide su recorrido.</p>
+        <div id="nivel-badge"></div>
+      </div>
+      <div id="selector-niveles"></div>
+      <div id="patio-root">
+        <div id="popup-estacion"><div id="popup-caja"></div></div>
+        <div id="boton-comenzar-overlay"></div>
+      </div>
+      <div id="controles-superiores">
+        <button id="boton-pausa" type="button">⏸ Pausa</button>
+        <button id="boton-reiniciar" type="button">↺ Reiniciar nivel</button>
+        <button id="boton-volver-niveles" type="button" style="display: none">← Elegir otro nivel</button>
+      </div>
+      <div id="selector-trenes"></div>
+      <div id="panel-dialogo" class="vacio">Seleccione un mensaje del andén y despáchelo para observar el ruteo.</div>
+    </div>
+  </body>
+</html>

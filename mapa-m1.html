@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>M1 — De ELIZA a los Transformers</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --fg: #0a0a0a;
+    --spine: #0a0a0a;
+    --border: #0a0a0a;
+    --muted: #6b6b6b;
+    --panel-bg: #0a0a0a;
+    --panel-fg: #f4f1ea;
+
+    --c-eliza:        #6b7280;
+    --c-ngram:        #7c3aed;
+    --c-w2v:          #0d9488;
+    --c-rnn:          #ea580c;
+    --c-transformer:  #d97706;
+    --c-alignment:    #dc2626;
+    --c-pred:         #7c3aed;
+    --c-vec:          #0d9488;
+    --c-mem:          #ea580c;
+    --c-ctx:          #d97706;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0a;
+      --fg: #f4f1ea;
+      --spine: #f4f1ea;
+      --border: #f4f1ea;
+      --muted: #9ca3af;
+      --panel-bg: #f4f1ea;
+      --panel-fg: #0a0a0a;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'JetBrains Mono', 'Fira Mono', 'Courier New', monospace;
+    background: var(--bg);
+    color: var(--fg);
+    min-height: 100vh;
+    padding: 48px 24px 96px;
+  }
+
+  header {
+    max-width: 680px;
+    margin: 0 auto 64px;
+  }
+
+  header .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  header h1 {
+    font-family: 'Arial Narrow', 'Arial', sans-serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── TIMELINE ── */
+  .timeline {
+    max-width: 680px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .spine {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--spine);
+    transform: translateX(-50%);
+  }
+
+  /* ── NODE ROW ── */
+  .node-row {
+    display: grid;
+    grid-template-columns: 1fr 48px 1fr;
+    align-items: center;
+    margin-bottom: 0;
+    position: relative;
+  }
+
+  .node-row + .node-row {
+    margin-top: 48px;
+  }
+
+  .annotation {
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--muted);
+    padding: 0 16px;
+  }
+
+  .annotation.left  { text-align: right; }
+  .annotation.right { text-align: left; }
+  .annotation.empty { pointer-events: none; }
+
+  .node-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+
+  /* connector dot */
+  .node-center::before {
+    content: '';
+    display: block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--fg);
+    margin-bottom: 8px;
+  }
+
+  .node-btn {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1.5px solid var(--node-color, var(--border));
+    border-radius: 2px;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+    transition: background 80ms, color 80ms;
+    position: relative;
+    z-index: 1;
+  }
+
+  .node-btn:hover {
+    background: var(--node-color, var(--border));
+    color: #fff;
+  }
+
+  .node-btn.active {
+    background: var(--node-color, var(--border));
+    color: #fff;
+  }
+
+  .node-year {
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 4px;
+    letter-spacing: 0.05em;
+  }
+
+  /* vertical connector line between nodes */
+  .connector {
+    display: flex;
+    justify-content: center;
+    height: 48px;
+    position: relative;
+  }
+
+  .connector::before {
+    content: '';
+    display: block;
+    width: 1px;
+    height: 100%;
+    background: var(--spine);
+  }
+
+  /* ── ALIGNMENT BRANCH ── */
+  .alignment-row {
+    display: grid;
+    grid-template-columns: 1fr 48px 1fr;
+    align-items: center;
+    margin-top: 32px;
+    margin-bottom: 32px;
+    position: relative;
+  }
+
+  .alignment-branch {
+    grid-column: 3;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-left: 8px;
+  }
+
+  .branch-line {
+    width: 40px;
+    height: 1px;
+    background: var(--c-alignment);
+    flex-shrink: 0;
+  }
+
+  .alignment-btn {
+    background: var(--bg);
+    color: var(--c-alignment);
+    border: 1.5px solid var(--c-alignment);
+    border-radius: 2px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: background 80ms, color 80ms;
+  }
+
+  .alignment-btn:hover,
+  .alignment-btn.active {
+    background: var(--c-alignment);
+    color: #fff;
+  }
+
+  /* ── CONCEPTOS EJE ── */
+  .conceptos-section {
+    max-width: 680px;
+    margin: 64px auto 0;
+  }
+
+  .conceptos-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-align: center;
+    margin-bottom: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+
+  .conceptos-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .concepto-btn {
+    background: var(--bg);
+    border: 1.5px solid var(--node-color, var(--border));
+    color: var(--node-color, var(--fg));
+    border-radius: 2px;
+    padding: 12px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: left;
+    transition: background 80ms, color 80ms;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .concepto-btn .concepto-sub {
+    font-size: 0.65rem;
+    font-weight: 400;
+    opacity: 0.7;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .concepto-btn:hover,
+  .concepto-btn.active {
+    background: var(--node-color, var(--border));
+    color: #fff;
+  }
+
+  .concepto-btn:hover .concepto-sub,
+  .concepto-btn.active .concepto-sub {
+    opacity: 1;
+  }
+
+  /* ── DETAIL PANEL ── */
+  #detail-panel {
+    max-width: 680px;
+    margin: 48px auto 0;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    border: 1px solid var(--border);
+    padding: 32px;
+    display: none;
+  }
+
+  #detail-panel.visible {
+    display: block;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.15);
+  }
+
+  .panel-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .panel-year {
+    font-size: 0.7rem;
+    opacity: 0.5;
+    letter-spacing: 0.05em;
+  }
+
+  .panel-tag {
+    margin-left: auto;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+    opacity: 0.6;
+  }
+
+  .panel-bullets {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .panel-bullets li {
+    font-size: 0.82rem;
+    line-height: 1.6;
+    padding-left: 20px;
+    position: relative;
+  }
+
+  .panel-bullets li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    opacity: 0.5;
+  }
+
+  .panel-link {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    font-size: 0.7rem;
+    opacity: 0.5;
+    letter-spacing: 0.05em;
+  }
+
+  .close-btn {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--panel-fg);
+    font-family: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+    opacity: 0.5;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0;
+    margin-left: 16px;
+  }
+
+  .close-btn:hover { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <p class="label">Bitácora — Módulo 01</p>
+  <h1>De ELIZA a los Transformers</h1>
+</header>
+
+<div class="timeline">
+  <div class="spine"></div>
+
+  <!-- ELIZA -->
+  <div class="node-row">
+    <div class="annotation left">
+      Primer chatbot.<br>Simula un psicoterapeuta.<br>Sin comprensión real.
+    </div>
+    <div class="node-center">
+      <button class="node-btn" style="--node-color: var(--c-eliza)"
+              data-id="eliza" onclick="showDetail('eliza')">
+        ELIZA
+      </button>
+      <span class="node-year">1966</span>
+    </div>
+    <div class="annotation right empty"></div>
+  </div>
+
+  <div class="connector"></div>
+
+  <!-- N-GRAMAS -->
+  <div class="node-row">
+    <div class="annotation left empty"></div>
+    <div class="node-center">
+      <button class="node-btn" style="--node-color: var(--c-ngram)"
+              data-id="ngrama" onclick="showDetail('ngrama')">
+        N-gramas
+      </button>
+      <span class="node-year">70s – 80s</span>
+    </div>
+    <div class="annotation right">
+      Predicción estadística.<br>¿Qué palabra sigue?<br>bigrama · trigrama.
+    </div>
+  </div>
+
+  <div class="connector"></div>
+
+  <!-- WORD2VEC -->
+  <div class="node-row">
+    <div class="annotation left">
+      Palabras como vectores.<br>REY − HOMBRE + MUJER<br>= REINA.
+    </div>
+    <div class="node-center">
+      <button class="node-btn" style="--node-color: var(--c-w2v)"
+              data-id="w2v" onclick="showDetail('w2v')">
+        Word2Vec
+      </button>
+      <span class="node-year">2013</span>
+    </div>
+    <div class="annotation right empty"></div>
+  </div>
+
+  <div class="connector"></div>
+
+  <!-- RNN -->
+  <div class="node-row">
+    <div class="annotation left empty"></div>
+    <div class="node-center">
+      <button class="node-btn" style="--node-color: var(--c-rnn)"
+              data-id="rnn" onclick="showDetail('rnn')">
+        RNN
+      </button>
+      <span class="node-year">80s – 2010s</span>
+    </div>
+    <div class="annotation right">
+      Redes recurrentes.<br>Memoria del contexto.<br>Base de Siri · Alexa.
+    </div>
+  </div>
+
+  <div class="connector"></div>
+
+  <!-- TRANSFORMERS -->
+  <div class="node-row">
+    <div class="annotation left">
+      Attention is all you need.<br>Todo mira a todo.<br>Google Brain · 2017.
+    </div>
+    <div class="node-center">
+      <button class="node-btn" style="--node-color: var(--c-transformer)"
+              data-id="transformer" onclick="showDetail('transformer')">
+        Transformers
+      </button>
+      <span class="node-year">2017</span>
+    </div>
+    <div class="annotation right empty"></div>
+  </div>
+
+  <!-- ALIGNMENT BRANCH -->
+  <div class="alignment-row">
+    <div></div>
+    <div></div>
+    <div class="alignment-branch">
+      <div class="branch-line"></div>
+      <button class="alignment-btn" data-id="alignment" onclick="showDetail('alignment')">
+        Alignment
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- CONCEPTOS EJE -->
+<div class="conceptos-section">
+  <p class="conceptos-label">Cuatro conceptos-eje</p>
+  <div class="conceptos-grid">
+    <button class="concepto-btn" style="--node-color: var(--c-pred)"
+            data-id="pred" data-link="ngrama" onclick="showDetail('pred')">
+      Predicción
+      <span class="concepto-sub">→ ver N-gramas</span>
+    </button>
+    <button class="concepto-btn" style="--node-color: var(--c-vec)"
+            data-id="vec" data-link="w2v" onclick="showDetail('vec')">
+      Vector
+      <span class="concepto-sub">→ ver Word2Vec</span>
+    </button>
+    <button class="concepto-btn" style="--node-color: var(--c-mem)"
+            data-id="mem" data-link="rnn" onclick="showDetail('mem')">
+      Memoria
+      <span class="concepto-sub">→ ver RNN</span>
+    </button>
+    <button class="concepto-btn" style="--node-color: var(--c-ctx)"
+            data-id="ctx" data-link="transformer" onclick="showDetail('ctx')">
+      Contexto
+      <span class="concepto-sub">→ ver Transformers</span>
+    </button>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div id="detail-panel">
+  <div class="panel-header">
+    <span class="panel-title" id="panel-title"></span>
+    <span class="panel-year" id="panel-year"></span>
+    <span class="panel-tag" id="panel-tag"></span>
+    <button class="close-btn" onclick="closeDetail()">cerrar ×</button>
+  </div>
+  <ul class="panel-bullets" id="panel-bullets"></ul>
+  <p class="panel-link" id="panel-link"></p>
+</div>
+
+<script>
+const DATA = {
+  eliza: {
+    title: "ELIZA",
+    year: "1966",
+    tag: "M.I.T. — Joseph Weizenbaum",
+    color: "var(--c-eliza)",
+    bullets: [
+      "No entiende el lenguaje: detecta palabras clave y aplica reglas de inversión gramatical. 'I feel sick' → 'Why do you feel sick?'",
+      "Los usuarios del MIT le atribuían emociones y confidencias genuinas. Weizenbaum quedó perturbado por esto, no orgulloso.",
+      "Es la primera demostración del efecto ELIZA: la ilusión de comprensión creada por la forma, no por el contenido.",
+      "Límite estructural: necesitás codificar a mano todas las posibilidades. Escala imposible."
+    ],
+    link: null
+  },
+  ngrama: {
+    title: "N-gramas",
+    year: "70s – 80s",
+    tag: "Predicción estadística",
+    color: "var(--c-ngram)",
+    bullets: [
+      "Un bigrama predice la palabra siguiente a partir de la anterior. Un trigrama mira las dos anteriores. La 'n' es cuántas palabras toma en cuenta.",
+      "El modelo aprende probabilidades desde corpus: P('comer' | 'quiero') = 0.3, P('dormir' | 'quiero') = 0.2, etc.",
+      "Abandona las reglas explícitas de ELIZA. El lenguaje emerge de las estadísticas, no de la lógica.",
+      "Introduce el concepto de PREDICCIÓN que va a ser central en todos los modelos posteriores, incluyendo los LLMs actuales."
+    ],
+    link: "concepto: predicción"
+  },
+  w2v: {
+    title: "Word2Vec",
+    year: "2013",
+    tag: "Google Brain — Mikolov et al.",
+    color: "var(--c-w2v)",
+    bullets: [
+      "Convierte cada palabra en un punto en un espacio vectorial de alta dimensión. La posición codifica significado.",
+      "REY − HOMBRE + MUJER ≈ REINA. La aritmética sobre vectores opera sobre conceptos.",
+      "La distancia entre vectores mide similitud semántica: 'gato' está más cerca de 'perro' que de 'automóvil'.",
+      "Introduce el concepto de VECTOR como representación operativa del significado. Todo lo que viene después lo asume."
+    ],
+    link: "concepto: vector"
+  },
+  rnn: {
+    title: "RNN — Redes Recurrentes",
+    year: "80s – 2010s",
+    tag: "Base de Siri · Alexa · GPT-2",
+    color: "var(--c-rnn)",
+    bullets: [
+      "A diferencia de las redes feedforward, las RNN tienen un 'estado oculto' que actúa como memoria de lo que procesaron antes.",
+      "Cada token nuevo se procesa junto con el estado anterior: la red recuerda el contexto reciente de la secuencia.",
+      "Problema estructural: la memoria se degrada con la distancia. Lo de hace 50 tokens pesa menos que lo de hace 5.",
+      "Variantes como LSTM y GRU mitigan esto parcialmente, pero el problema de escala persiste hasta los transformers."
+    ],
+    link: "concepto: memoria"
+  },
+  transformer: {
+    title: "Transformers",
+    year: "2017",
+    tag: "Attention Is All You Need — Google Brain",
+    color: "var(--c-transformer)",
+    bullets: [
+      "'Attention Is All You Need' (Vaswani et al., 2017): el paper fundacional. Reemplaza la recurrencia secuencial por mecanismos de atención paralelos.",
+      "En el mecanismo de atención, cada token 'mira' a todos los demás y calcula cuánto debe pesarlos. Todo procesa en paralelo.",
+      "El preentrenamiento sobre internet escala masivamente porque la arquitectura no tiene cuello de botella secuencial.",
+      "El CONTEXTO es el input completo que recibe el modelo. Quién controla qué entra en ese contexto controla el comportamiento del sistema."
+    ],
+    link: "concepto: contexto"
+  },
+  alignment: {
+    title: "Alignment",
+    year: "post-2017",
+    tag: "Problema abierto",
+    color: "var(--c-alignment)",
+    bullets: [
+      "El problema de hacer que un LLM haga lo que queremos dentro de un marco que nosotros planteamos, sin que derive en comportamientos no deseados.",
+      "Las instrucciones de alignment son texto: un system prompt. La conducta del modelo es una función de ese texto. Quien lo escribe, controla.",
+      "En los departamentos de alignment trabajan psicólogos, filósofos, lingüistas. No solo ingenieros. Las instrucciones son filosófica y políticamente cargadas.",
+      "Conexión con el hilo del proyecto: el alignment es el equivalente técnico de la propaganda. Un texto invisible que programa conducta masiva."
+    ],
+    link: null
+  },
+  pred: {
+    title: "Predicción",
+    year: null,
+    tag: "Concepto-eje",
+    color: "var(--c-pred)",
+    bullets: [
+      "El mecanismo central de todos los LLMs: el modelo siempre está eligiendo qué token viene a continuación, no 'pensando' ni 'entendiendo'.",
+      "Introducido por los N-gramas en forma estadística. Llevado a escala masiva por los transformers.",
+      "La predicción no es objetiva: depende del corpus de entrenamiento. Si el corpus tiene sesgos, las predicciones los reflejan.",
+      "Que una respuesta sea fluida no significa que sea verdadera. La fluidez es un efecto de predicción bien calibrada, nada más."
+    ],
+    link: "ngrama"
+  },
+  vec: {
+    title: "Vector",
+    year: null,
+    tag: "Concepto-eje",
+    color: "var(--c-vec)",
+    bullets: [
+      "Una palabra representada como punto en un espacio de n-dimensiones (n puede ser 768, 1536, etc.). La posición codifica relaciones semánticas.",
+      "Las operaciones matemáticas sobre vectores corresponden a operaciones sobre significados: suma, resta, distancia coseno.",
+      "El espacio vectorial no es neutro: es una proyección del corpus. Las relaciones que 'aprende' el modelo vienen de lo que estaba en internet.",
+      "Fundamento de Word2Vec (2013) y de todos los embeddings posteriores. Sin vectores, no hay transformers."
+    ],
+    link: "w2v"
+  },
+  mem: {
+    title: "Memoria",
+    year: null,
+    tag: "Concepto-eje",
+    color: "var(--c-mem)",
+    bullets: [
+      "En las RNN, la memoria es el estado oculto que se propaga token a token: el modelo recuerda lo que procesó antes.",
+      "En los transformers, la 'memoria' es técnicamente el contexto: todo lo que está en la ventana de contexto activa.",
+      "Los LLMs actuales no tienen memoria persistente entre conversaciones por defecto. Cada sesión empieza desde cero.",
+      "La memoria externa (RAG, bases de datos vectoriales) se agrega como ingeniería adicional, no es parte del modelo en sí."
+    ],
+    link: "rnn"
+  },
+  ctx: {
+    title: "Contexto",
+    year: null,
+    tag: "Concepto-eje",
+    color: "var(--c-ctx)",
+    bullets: [
+      "El contexto es todo lo que recibe el modelo como input: el system prompt, el historial de conversación, los documentos adjuntos.",
+      "La ventana de contexto tiene un límite (tokens). Lo que no entra en esa ventana, el modelo no lo 'sabe'.",
+      "Quien controla el contexto controla el comportamiento. El system prompt es invisible al usuario pero determina la respuesta.",
+      "Conexión con el hilo del proyecto: el contexto es el espacio donde opera el alignment. Es el símbolo que precede al símbolo que vemos."
+    ],
+    link: "transformer"
+  }
+};
+
+let currentId = null;
+
+function showDetail(id) {
+  const d = DATA[id];
+  if (!d) return;
+
+  // toggle
+  if (currentId === id) {
+    closeDetail();
+    return;
+  }
+
+  currentId = id;
+
+  // update active states
+  document.querySelectorAll('[data-id]').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll(`[data-id="${id}"]`).forEach(el => el.classList.add('active'));
+
+  // fill panel
+  document.getElementById('panel-title').textContent = d.title;
+  document.getElementById('panel-year').textContent = d.year ?? '';
+  document.getElementById('panel-tag').textContent = d.tag;
+
+  const ul = document.getElementById('panel-bullets');
+  ul.innerHTML = d.bullets.map(b => `<li>${b}</li>`).join('');
+
+  const linkEl = document.getElementById('panel-link');
+  if (d.link) {
+    // concepto linking to timeline node
+    if (DATA[d.link]) {
+      linkEl.innerHTML = `↗ Ver en la línea de tiempo: <strong>${DATA[d.link].title}</strong>`;
+      linkEl.style.cursor = 'pointer';
+      linkEl.onclick = () => showDetail(d.link);
+    } else {
+      linkEl.textContent = d.link;
+      linkEl.onclick = null;
+    }
+    linkEl.style.display = 'block';
+  } else {
+    linkEl.style.display = 'none';
+  }
+
+  const panel = document.getElementById('detail-panel');
+  panel.classList.add('visible');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeDetail() {
+  currentId = null;
+  document.querySelectorAll('[data-id]').forEach(el => el.classList.remove('active'));
+  document.getElementById('detail-panel').classList.remove('visible');
+}
+</script>
+
+</body>
+</html>
